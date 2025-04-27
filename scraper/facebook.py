@@ -8,13 +8,17 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.support import expected_conditions as EC
 
-class UndetectedFacebookScraper:
+from . import Driver
+
+
+class Facebook(Driver):
     
     def __init__(self, username, password, headless=False):
+        
+        super().__init__(headless)
+        
         self.username = username
         self.password = password
-        self.headless = headless
-        self.driver = None
         self.network_logs = []
     
     #  -  -  -  -  -  start and end driver -  -  -  -  -  -  -  -  #
@@ -28,6 +32,8 @@ class UndetectedFacebookScraper:
         
         if self.headless:
             options.add_argument("--headless")
+        else:
+            options.add_argument("--start-maximized")
         
         # Enable performance logging to capture network requests
         options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
@@ -105,7 +111,7 @@ class UndetectedFacebookScraper:
             print("Login failed or took too long")
             return False
     
-    def capture_network_requests(self, url, scroll_count=10, wait_time=2):
+    def capture_network_requests(self, url):
         """Navigate to a page and capture network requests with random delays"""
         self.driver.get(url)
         self.human_like_delay()
@@ -127,8 +133,11 @@ class UndetectedFacebookScraper:
         # Process initial logs
         process_logs()
         
+        # the time that the user will do scroll
+        SCROLL_COUNT: int = 20
+        
         # Scroll to trigger more network requests with random behavior
-        for _ in range(scroll_count):
+        for _ in range(SCROLL_COUNT):
             scroll_amount = random.randint(300, 800)
             self.driver.execute_script(f"window.scrollBy(0, {scroll_amount});")
             self.human_like_delay()
@@ -142,6 +151,7 @@ class UndetectedFacebookScraper:
         
         for log in self.network_logs:
             try:
+                
                 if "Network.requestWillBeSent" in log["method"]:
                     request = log["params"]["request"]
                     if "graphql" in request["url"].lower() or "query" in request["url"].lower():
@@ -158,14 +168,18 @@ class UndetectedFacebookScraper:
                 
                 if "Network.responseReceived" in log["method"]:
                     response = log["params"]["response"]
-                    if "graphql" in response["url"].lower() or "query" in response["url"].lower():
+                    url_response = response["url"].lower()
+                    
+                    if "graphql" in url_response or "query" in url_response:
                         entry = {
                             "type": "response",
                             "url": response["url"],
                             "status": response["status"],
                             "timestamp": log["params"]["timestamp"],
-                            "headers": {k: v for k, v in response["headers"].items() 
-                                        if k.lower() not in ["set-cookie"]}
+                            "headers": {
+                                k: v for k, v in response["headers"].items() 
+                                    if k.lower() not in ["set-cookie"]
+                            }
                         }
                         
                         # Try to get response body
@@ -173,14 +187,17 @@ class UndetectedFacebookScraper:
                         try:
                             response_body = self.driver.execute_cdp_cmd(
                                 "Network.getResponseBody", 
-                                {"requestId": request_id})
+                                {"requestId": request_id}
+                            )
                             entry["body"] = response_body
+                                
                         except ValueError as e:
                             print(e)
                             entry["body"] = "unavailable"
                         
                         graphql_data.append(entry)
-            except KeyError:
+            except KeyError as key:
+                print(key)
                 continue
                 
         return graphql_data
